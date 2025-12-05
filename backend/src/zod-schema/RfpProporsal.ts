@@ -5,29 +5,30 @@ export const RfpItemSchema = z
     name: z
       .string()
       .describe("Short name of the requested item, e.g. 'Laptop', 'Router', 'Printer Ink'."),
-    
+
     description: z
       .string()
       .nullable()
       .optional()
       .describe("Detailed description/specification of the item (optional)."),
-    
+
     quantity: z
       .number()
       .int()
       .describe("How many units of this item are required (whole number)."),
-    
+
     unitPrice: z
       .number()
       .nullable()
       .optional()
       .describe("Price per unit if known, otherwise null."),
-    
+
     totalPrice: z
       .number()
       .nullable()
       .optional()
       .describe("Total price for all units (quantity X unitPrice) if known, otherwise null."),
+
     extras: z
       .record(z.string(), z.unknown())
       .optional()
@@ -76,41 +77,61 @@ export const RfpCoreFullSchema = z
   })
   .describe("Core commercial details of an RFP, including budget, delivery, and list of requested items.");
 
+export type RfpItem = z.infer<typeof RfpItemSchema>;
+export type RfpItemPartial = Partial<RfpItem>;
 
 export type RfpCore = z.infer<typeof RfpCoreFullSchema>;
-
 export const RfpCorePartialSchema = RfpCoreFullSchema.partial();
 export type RfpCorePartial = z.infer<typeof RfpCorePartialSchema>;
 
-export class RfpCoreBuilder {
-  private state: RfpCorePartial = {};
+type BuilderFull<TSchema extends z.ZodTypeAny> = z.infer<TSchema>;
+type BuilderPartial<TSchema extends z.ZodTypeAny> = Partial<BuilderFull<TSchema>>;
 
-  static fromState(state: RfpCorePartial = {}): RfpCoreBuilder {
-    const b = new RfpCoreBuilder();
-    b.state = { ...state };
-    return b;
+class RFPBuilder<TSchema extends z.ZodObject<any>> {
+  private state: BuilderPartial<TSchema> = {};
+
+  constructor(private readonly schema: TSchema, initial: BuilderPartial<TSchema> = {}) {
+    this.state = { ...initial };
   }
 
-  mergeFromLlm(partial: RfpCorePartial): this {
+  static fromState<TSchema extends z.ZodObject<any>>(
+    schema: TSchema,
+    state: BuilderPartial<TSchema> = {}
+  ): RFPBuilder<TSchema> {
+    return new RFPBuilder(schema, state);
+  }
+
+  mergeFromLlm(partial: BuilderPartial<TSchema>): this {
+    const mergedItems = Array.isArray(partial.rfpItems ?? undefined)
+      ? (partial.rfpItems as typeof RfpItemSchema[]).map((item) =>
+        RfpItemBuilder.fromState(RfpItemSchema, item)
+        .mergeFromLlm(item)
+        .toState()
+      )
+      : this.state.rfpItems;
+
     this.state = {
       ...this.state,
       ...Object.fromEntries(
         Object.entries(partial).filter(
-          ([key, value]) => value != null && this.state[key as keyof RfpCorePartial] == null
+          ([key, value]) =>
+          key !== "rfpItems" &&
+          value != null &&
+          this.state[key as keyof BuilderPartial<TSchema>] == null &&
+          !Array.isArray(value)
         )
       ),
+      rfpItems: mergedItems,
     };
     return this;
   }
 
-
-
-  mergeFromUser(partial: RfpCorePartial): this {
+  mergeFromUser(partial: BuilderPartial<TSchema>): this {
     this.state = { ...this.state, ...partial };
     return this;
   }
 
-  getMissingRequiredFields(): (keyof RfpCore)[] {
+  getMissingRequiredFields(): (keyof BuilderFull<TSchema>)[] {
     return this.getMissingRequiredFieldsFromZod(this.state);
   }
 
@@ -118,37 +139,72 @@ export class RfpCoreBuilder {
     return this.getMissingRequiredFields().length === 0;
   }
 
-  toState(): RfpCorePartial {
+  toState(): BuilderPartial<TSchema> {
     return { ...this.state };
   }
 
-  build(): RfpCore {
-    if(!this.isComplete()) {
-      throw new Error("Cannot build RfpCore: missing required fields: " + this.getMissingRequiredFields().join(", "));
+  build(): BuilderFull<TSchema> {
+    if (!this.isComplete()) {
+      throw new Error(
+        "Cannot build: missing required fields: " +
+          this.getMissingRequiredFields().map((val)=>{
+            if(val === "rfpItems") {
+              return RfpItemBuilder.fromState(RfpItemSchema).getMissingRequiredFields().map(itemVal => `rfpItems.${String(itemVal)}`).join(", ");
+            }
+          }).join(", ")
+      );
     }
-    const result = RfpCoreFullSchema.safeParse(this.state);
+    const result = this.schema.safeParse(this.state);
     if (!result.success) {
       throw new Error(
-        "Cannot build RfpCore: \n" + JSON.stringify(result.error)
+        "Cannot build: \n" + JSON.stringify(result.error, null, 2)
       );
     }
     return result.data;
   }
 
-  private getMissingRequiredFieldsFromZod<T extends object>(state: T): (keyof T)[] {
-    const shape = (RfpCoreFullSchema as z.ZodObject<any>).shape;
-    const missing: (keyof T)[] = [];
+  private getMissingRequiredFieldsFromZod(
+    state: BuilderPartial<TSchema>
+  ): (keyof BuilderFull<TSchema>)[] {
+    const shape = this.schema.shape;
+    const missing: (keyof BuilderFull<TSchema>)[] = [];
     for (const key in shape) {
-        const schema = shape[key];
-        if (
-            !(schema.isOptional() || (schema.isNullable() && schema.isOptional()))
-        ) {
-            if (state[key as keyof T] == null) {
-                missing.push(key as keyof T);
-            }
+      const fieldSchema: any = shape[key];
+      if (key === "rfpItems" && Array.isArray(state.rfpItems)) {
+        for (let i = 0; i < state.rfpItems.length; i++) {
+          const item = state.rfpItems[i];
+          const itemBuilder = RfpItemBuilder.fromState(RfpItemSchema, item);
+          const itemMissingFields = itemBuilder.getMissingRequiredFields();
+          if (itemMissingFields.length > 0) {
+            missing.push(...itemMissingFields.map(f => `rfpItems.${i}.${String(f)}` as keyof BuilderFull<TSchema>));
+          }
         }
+      }
+      const isOptional =
+        typeof fieldSchema.isOptional === "function" &&
+        fieldSchema.isOptional();
+      const isNullable =
+        typeof fieldSchema.isNullable === "function" &&
+        fieldSchema.isNullable();
+      if (!(isOptional || (isNullable && isOptional))) {
+        const value = (state as any)[key];
+        if (value == null) {
+          missing.push(key as keyof BuilderFull<TSchema>);
+        }
+      }
     }
     return missing;
   }
 }
 
+export class RfpCoreBuilder extends RFPBuilder<typeof RfpCoreFullSchema> {
+  constructor(initial: RfpCorePartial = {}) {
+    super(RfpCoreFullSchema, initial);
+  }
+}
+
+export class RfpItemBuilder extends RFPBuilder<typeof RfpItemSchema> {
+  constructor(initial: RfpItemPartial = {}) {
+    super(RfpItemSchema, initial);
+  }
+}

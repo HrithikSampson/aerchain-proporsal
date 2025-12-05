@@ -3,8 +3,8 @@ import express, { Response , Request } from "express";
 import * as _ from "lodash";
 import config from "./config/config";
 import http from "http";
-import { createServer } from "node:http";
 import { Server } from "socket.io";
+import { setupProposalHandlers, getActiveRooms } from "./ai-interaction/handleProporsalRequest";
 
 
 const app = express();
@@ -20,13 +20,21 @@ app.get("/", (_req: Request, res: Response) => {
     res.send("ok");
 });
 
+app.get("/proposal/rooms", (_req: Request, res: Response) => {
+    const rooms = getActiveRooms();
+    res.json({ rooms, count: rooms.length });
+});
 
-const io = new Server(server, {
+
+export const io = new Server(server, {
   path: "/proposal-socket",
   cors: {
-    origin: config.FRONTEND_URL
+    origin: config.FRONTEND_URL,
+    credentials: true,
   },
 });
+
+setupProposalHandlers(io);
 
 AppDataSource.initialize()
     .then(() => {
@@ -35,8 +43,9 @@ AppDataSource.initialize()
         console.error("Error during Data Source initialization:", err);
     });
 
-app.listen(port, () => {
+server.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);
+    console.log(`Socket.IO server ready on path: /proposal-socket`);
 });
 
 

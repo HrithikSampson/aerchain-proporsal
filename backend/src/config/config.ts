@@ -35,8 +35,7 @@ export default {
 		logging: process.env.TYPEORM_LOGGING ? process.env.TYPEORM_LOGGING === "true" : false,
 	} as DbConfig,
 
-	// Default LLM model for all clients. Can be overridden with the LLM_MODEL env var.
-	LLM_MODEL: process.env.LLM_MODEL || "claude-haiku-4.5",
+	LLM_MODEL: "gemini-1.5-pro",
 
 	API_KEY: process.env.LLM_API_KEY,
 };
