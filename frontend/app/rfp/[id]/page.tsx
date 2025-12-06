@@ -157,7 +157,7 @@ export default function RfpDetailPage() {
                     Budget
                   </h3>
                   <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                    {rfp.budgetCurrency} {parseFloat(rfp.budgetAmount).toLocaleString()}
+                    {rfp.budgetCurrency} {parseFloat(rfp.budgetAmount)}
                   </p>
                 </div>
                 <div>
@@ -230,10 +230,10 @@ export default function RfpDetailPage() {
                           {item.quantity}
                         </td>
                         <td className="py-3 text-right text-sm text-zinc-900 dark:text-zinc-50">
-                          {rfp.budgetCurrency} {parseFloat(item.unitPrice).toLocaleString()}
+                          {rfp.budgetCurrency} {parseFloat(item.unitPrice)}
                         </td>
                         <td className="py-3 text-right text-sm font-medium text-zinc-900 dark:text-zinc-50">
-                          {rfp.budgetCurrency} {parseFloat(item.totalPrice).toLocaleString()}
+                          {rfp.budgetCurrency} {parseFloat(item.totalPrice)}
                         </td>
                       </tr>
                     ))}
@@ -298,13 +298,13 @@ export default function RfpDetailPage() {
                           <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
                             <div className="text-xs text-zinc-600 dark:text-zinc-400">Average Price</div>
                             <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                              {rfp.budgetCurrency} {recommendationData.comparison.averagePrice.toLocaleString()}
+                              {rfp.budgetCurrency} {recommendationData.comparison.averagePrice}
                             </div>
                           </div>
                           <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
                             <div className="text-xs text-zinc-600 dark:text-zinc-400">Price Range</div>
                             <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                              {rfp.budgetCurrency} {recommendationData.comparison.priceRange.toLocaleString()}
+                              {rfp.budgetCurrency} {recommendationData.comparison.priceRange}
                             </div>
                           </div>
                         </div>
@@ -483,10 +483,10 @@ export default function RfpDetailPage() {
                               </div>
                               <div className="text-right">
                                 <div className="text-zinc-900 dark:text-zinc-50">
-                                  {proposal.budgetCurrency} {item.unitPrice.toLocaleString()} each
+                                  {proposal.budgetCurrency} {item.unitPrice} each
                                 </div>
                                 <div className="text-xs text-zinc-600 dark:text-zinc-400">
-                                  Total: {proposal.budgetCurrency} {item.totalPrice.toLocaleString()}
+                                  Total: {proposal.budgetCurrency} {item.totalPrice}
                                 </div>
                               </div>
                             </div>
