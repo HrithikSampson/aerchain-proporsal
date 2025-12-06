@@ -31,7 +31,7 @@ export default {
 		username: process.env.DB_USER || "postgres",
 		password: process.env.DB_PASS || "postgres",
 		database: process.env.DB_NAME || "rfp_db",
-		synchronize: process.env.TYPEORM_SYNC ? process.env.TYPEORM_SYNC === "true" : true,
+		synchronize: false,
 		logging: process.env.TYPEORM_LOGGING ? process.env.TYPEORM_LOGGING === "true" : false,
 	} as DbConfig,
 

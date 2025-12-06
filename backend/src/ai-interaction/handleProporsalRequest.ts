@@ -5,6 +5,7 @@ import { RfpProposal } from "../entity/RfpProporsal";
 import { v4 as uuid } from "uuid";
 import AppDataSource from "../data-source";
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
+import config from "../config/config";
 
 type MessageWithRole = {
   role: "user" | "llm";
@@ -85,6 +86,7 @@ function startSessionCleanup(io: Server): void {
 
 const embeddings = new GoogleGenerativeAIEmbeddings({
   model: "text-embedding-004",
+  apiKey: config.API_KEY
 });
 
 async function generateConversationEmbedding(
@@ -100,7 +102,7 @@ async function generateConversationEmbedding(
 async function saveCompletedProposal(
   session: ProposalSession,
   userId: string
-): Promise<RfpProposal | null> {
+): Promise<RFP | null> {
   try {
     const rfpCore = session.builder.build();
 
@@ -117,23 +119,7 @@ async function saveCompletedProposal(
     });
     await rfpRepo.save(rfp);
 
-    const proposalRepo = AppDataSource.getRepository(RfpProposal);
-    const proposal = new RfpProposal();
-    proposal.budgetAmount = rfpCore.budgetAmount.toString();
-    proposal.budgetCurrency = rfpCore.budgetCurrency;
-    proposal.items = rfpCore.rfpItems.map(item => ({
-      name: item.name,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice || 0,
-      totalPrice: item.totalPrice || 0,
-      specs: (item.extras || {}) as Record<string, string>,
-    }));
-    proposal.rfp = rfp;
-    proposal.extraItems = (rfpCore.extras || {}) as Record<string, string>;
-    proposal.notes = `Warranty: ${rfpCore.warrantyMonths || 0} months. Payment Terms: ${rfpCore.paymentTerms || "N/A"}`;
-    await proposalRepo.save(proposal);
-
-    return proposal;
+    return rfp;
   } catch (error) {
     console.error("Error saving completed proposal:", error);
     return null;
@@ -163,13 +149,27 @@ export function setupProposalHandlers(io: Server): void {
 
     socket.on(
       "proposal:join",
-      async (payload: { message: string }) => {
-        const { message } = payload;
-        const rfpId = uuid();
-        const session = getOrCreateSession(rfpId, message);
+      async (payload: { message?: string; roomId?: string }) => {
+        const { message, roomId: providedRoomId } = payload;
+
+        const rfpId = providedRoomId || uuid();
+
+        let session = sessions.get(rfpId);
+        const isNewSession = !session;
+
+        if (isNewSession && message) {
+          session = getOrCreateSession(rfpId, message);
+        } else if (session) {
+          console.log(`Reconnecting to existing session: ${rfpId}`);
+        } else {
+          socket.emit("proposal:error", {
+            message: "Cannot join session: session does not exist and no initial message provided",
+          });
+          return;
+        }
+
         session.sockets.add(socket.id);
         touchSession(rfpId);
-
         socket.join(rfpId);
 
         proposalNs.to(rfpId).emit("proposal:joined", {
@@ -179,30 +179,45 @@ export function setupProposalHandlers(io: Server): void {
 
         console.log(`User joined proposal session for RFP ${rfpId}`);
 
-        try {
-          const { ChainBuilder } = await import("./llm-interaction");
+        // Only process initial message for new sessions
+        if (isNewSession && message) {
+          try {
+            const { ChainBuilder } = await import("./llm-interaction");
 
-          const chain = new ChainBuilder(session.messages);
-          const { response: llmResponse, nextQuestion } = await chain.interactLLM();
+            const chain = new ChainBuilder(session.messages);
+            const { response: llmResponse, nextQuestion } = await chain.interactLLM();
 
-          session.builder.mergeFromLlm(llmResponse);
-          session.partialState = session.builder.toState();
+            session.builder.mergeFromLlm(llmResponse);
+            session.partialState = session.builder.toState();
 
-          if (nextQuestion) {
-            session.messages.push({ role: "llm", content: nextQuestion });
+            if (nextQuestion) {
+              session.messages.push({ role: "llm", content: nextQuestion });
 
-            proposalNs.to(rfpId).emit("proposal:question", {
-              question: nextQuestion,
-              currentState: session.partialState,
-              missingFields: session.builder.getMissingRequiredFields(),
+              proposalNs.to(rfpId).emit("proposal:question", {
+                question: nextQuestion,
+                currentState: session.partialState,
+                missingFields: session.builder.getMissingRequiredFields(),
+              });
+            }
+          } catch (error) {
+            console.error("Error processing initial message:", error);
+            proposalNs.to(rfpId).emit("proposal:error", {
+              message: "An error occurred while starting the proposal session.",
+              error: error instanceof Error ? error.message : "Unknown error",
             });
           }
-        } catch (error) {
-          console.error("Error processing initial message:", error);
-          proposalNs.to(rfpId).emit("proposal:error", {
-            message: "An error occurred while starting the proposal session.",
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
+        } else if (!isNewSession && session) {
+          // For reconnections, send the current state
+          if (session.messages.length > 0) {
+            const lastMessage = session.messages[session.messages.length - 1];
+            if (lastMessage.role === "llm") {
+              proposalNs.to(socket.id).emit("proposal:question", {
+                question: lastMessage.content,
+                currentState: session.partialState,
+                missingFields: session.builder.getMissingRequiredFields(),
+              });
+            }
+          }
         }
       }
     );

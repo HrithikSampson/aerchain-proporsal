@@ -7,6 +7,7 @@ import {
   ManyToOne,
 } from "typeorm";
 import { RFP } from "./RFP";
+import { Vendor } from "./Vendor";
 
 @Entity("rfp_proposal")
 export class RfpProposal {
@@ -30,6 +31,9 @@ export class RfpProposal {
 
   @ManyToOne(() => RFP, (rfp) => rfp.proposals, { onDelete: "CASCADE" })
   rfp!: RFP;
+
+  @ManyToOne(() => Vendor, (vendor) => vendor.proposals, { onDelete: "CASCADE" })
+  vendor!: Vendor;
 
   @Column({ type: "jsonb", nullable: true })
   extraItems!: Record<string, string> | null;
