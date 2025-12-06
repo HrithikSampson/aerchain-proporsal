@@ -1,7 +1,7 @@
 import { Server, Socket } from "socket.io";
 import { RfpCoreBuilder, RfpCorePartial } from "../zod-schema/RfpProporsal";
 import { RFP } from "../entity/RFP";
-import { RfpProposal } from "../entity/RfpProporsal";
+import { RfpItem } from "../entity/RfpItem";
 import { v4 as uuid } from "uuid";
 import AppDataSource from "../data-source";
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
@@ -73,7 +73,7 @@ function startSessionCleanup(io: Server): void {
     const now = Date.now();
     const sessionEntries = Array.from(sessions.entries());
     for (const [roomId, session] of sessionEntries) {
-      if (now - session.lastActivityAt.getMilliseconds() > SESSION_TTL_MS) {
+      if (now - session.lastActivityAt.getTime() > SESSION_TTL_MS) {
         const proposalNs = io.of("/proposal");
         proposalNs.to(roomId).emit("proposal:end", {
           reason: "Session expired due to inactivity.",
@@ -85,23 +85,28 @@ function startSessionCleanup(io: Server): void {
 }
 
 const embeddings = new GoogleGenerativeAIEmbeddings({
-  model: "text-embedding-004",
-  apiKey: config.API_KEY
+  model: "embedding-001",
+  apiKey: config.API_KEY,
 });
 
 async function generateConversationEmbedding(
   messages: MessageWithRole[]
-): Promise<number[]> {
-  const conversationText = messages
-    .map((msg) => `${msg.role}: ${msg.content}`)
-    .join(". ");
-  const embedding = await embeddings.embedQuery(conversationText);
-  return embedding;
+): Promise<number[] | null> {
+  try {
+    const conversationText = messages
+      .map((msg) => `${msg.role}: ${msg.content}`)
+      .join(". ");
+    const embedding = await embeddings.embedQuery(conversationText);
+    return embedding;
+  } catch (error) {
+    console.warn("Failed to generate embedding (quota exceeded or API error), continuing without embedding:", error instanceof Error ? error.message : error);
+    return null;
+  }
 }
 
-async function saveCompletedProposal(
+async function saveCompletedRfp(
   session: ProposalSession,
-  userId: string
+  _userId: string
 ): Promise<RFP | null> {
   try {
     const rfpCore = session.builder.build();
@@ -109,19 +114,47 @@ async function saveCompletedProposal(
     const conversationEmbedding = await generateConversationEmbedding(session.messages);
 
     const rfpRepo = AppDataSource.getRepository(RFP);
+    const rfpItemRepo = AppDataSource.getRepository(RfpItem);
+
     const rfp = rfpRepo.create({
       user_input: session.messages.map(m => `${m.role}: ${m.content}`).join(". "),
-      embedding: conversationEmbedding,
+      embedding: conversationEmbedding || undefined,
       budgetAmount: rfpCore.budgetAmount.toString(),
       budgetCurrency: rfpCore.budgetCurrency,
       proporsalFinalisingEndDate: rfpCore.deliveryDays,
       extraItems: (rfpCore.extras || {}) as {[key: string]: string},
     });
+
     await rfpRepo.save(rfp);
+    console.log(`Saved RFP with ID: ${rfp.id}`);
+
+    if (rfpCore.rfpItems && rfpCore.rfpItems.length > 0) {
+      const rfpItems = rfpCore.rfpItems.map(item => {
+        const rfpItem = rfpItemRepo.create({
+          description: item.description || item.name,
+          quantity: item.quantity,
+          specs: {
+            name: item.name,
+            unitPrice: item.unitPrice?.toString() || 'N/A',
+            totalPrice: item.totalPrice?.toString() || 'N/A',
+            ...(item.extras || {})
+          },
+          rfp: rfp,
+        });
+        return rfpItem;
+      });
+
+      await rfpItemRepo.save(rfpItems);
+      console.log(`Saved ${rfpItems.length} items for RFP ${rfp.id}`);
+    }
 
     return rfp;
   } catch (error) {
-    console.error("Error saving completed proposal:", error);
+    console.error("Error saving RFP to database:", error);
+    if (error instanceof Error) {
+      console.error("Error details:", error.message);
+      console.error("Error stack:", error.stack);
+    }
     return null;
   }
 }
@@ -179,7 +212,6 @@ export function setupProposalHandlers(io: Server): void {
 
         console.log(`User joined proposal session for RFP ${rfpId}`);
 
-        // Only process initial message for new sessions
         if (isNewSession && message) {
           try {
             const { ChainBuilder } = await import("./llm-interaction");
@@ -190,7 +222,30 @@ export function setupProposalHandlers(io: Server): void {
             session.builder.mergeFromLlm(llmResponse);
             session.partialState = session.builder.toState();
 
-            if (nextQuestion) {
+            console.log("Initial state after merge:", JSON.stringify(session.partialState, null, 2));
+            console.log("Initial missing fields:", session.builder.getMissingRequiredFields());
+            console.log("Initial is complete:", session.builder.isComplete());
+
+            if (session.builder.isComplete()) {
+              console.log("Initial RFP is complete, attempting to save...");
+              const savedRfp = await saveCompletedRfp(session, "initial-user");
+
+              if (savedRfp) {
+                console.log("Initial RFP saved successfully, emitting completion event");
+                proposalNs.to(rfpId).emit("proposal:complete", {
+                  message: "Your RFP has been completed and saved!",
+                  rfp: savedRfp,
+                  rfpCore: session.builder.build(),
+                });
+
+                removeSession(rfpId, io);
+              } else {
+                console.log("Failed to save initial RFP, emitting error");
+                proposalNs.to(rfpId).emit("proposal:error", {
+                  message: "Failed to save the RFP. Please try again.",
+                });
+              }
+            } else if (nextQuestion) {
               session.messages.push({ role: "llm", content: nextQuestion });
 
               proposalNs.to(rfpId).emit("proposal:question", {
@@ -207,7 +262,6 @@ export function setupProposalHandlers(io: Server): void {
             });
           }
         } else if (!isNewSession && session) {
-          // For reconnections, send the current state
           if (session.messages.length > 0) {
             const lastMessage = session.messages[session.messages.length - 1];
             if (lastMessage.role === "llm") {
@@ -247,7 +301,30 @@ export function setupProposalHandlers(io: Server): void {
           session.builder.mergeFromLlm(llmResponse);
           session.partialState = session.builder.toState();
 
-          if (nextQuestion) {
+          console.log("Current state after merge:", JSON.stringify(session.partialState, null, 2));
+          console.log("Missing fields:", session.builder.getMissingRequiredFields());
+          console.log("Is complete:", session.builder.isComplete());
+
+          if (session.builder.isComplete()) {
+            console.log("RFP is complete, attempting to save...");
+            const savedRfp = await saveCompletedRfp(session, userId);
+
+            if (savedRfp) {
+              console.log("RFP saved successfully, emitting completion event");
+              proposalNs.to(rfpId).emit("proposal:complete", {
+                message: "Your RFP has been completed and saved!",
+                rfp: savedRfp,
+                rfpCore: session.builder.build(),
+              });
+
+              removeSession(rfpId, io);
+            } else {
+              console.log("Failed to save RFP, emitting error");
+              proposalNs.to(rfpId).emit("proposal:error", {
+                message: "Failed to save the RFP. Please try again.",
+              });
+            }
+          } else if (nextQuestion) {
             session.messages.push({ role: "llm", content: nextQuestion });
 
             proposalNs.to(rfpId).emit("proposal:question", {
@@ -255,24 +332,6 @@ export function setupProposalHandlers(io: Server): void {
               currentState: session.partialState,
               missingFields: session.builder.getMissingRequiredFields(),
             });
-          }
-
-          if (session.builder.isComplete()) {
-            const savedProposal = await saveCompletedProposal(session, userId);
-
-            if (savedProposal) {
-              proposalNs.to(rfpId).emit("proposal:complete", {
-                message: "Your RFP proposal has been completed and saved!",
-                proposal: savedProposal,
-                rfpCore: session.builder.build(),
-              });
-
-              removeSession(rfpId, io);
-            } else {
-              proposalNs.to(rfpId).emit("proposal:error", {
-                message: "Failed to save the proposal. Please try again.",
-              });
-            }
           }
         } catch (error) {
           console.error("Error processing answer:", error);
@@ -296,5 +355,4 @@ export function setupProposalHandlers(io: Server): void {
     });
   });
 }
-
 

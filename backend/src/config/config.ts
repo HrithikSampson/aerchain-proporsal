@@ -19,6 +19,15 @@ export type DbConfig = {
 if (!process.env.LLM_API_KEY) {
     throw new Error("LLM_API_KEY environment variable is not set");
 }
+if(!process.env.EMAIL_PASSWORD) {
+	throw new Error("EMAIL_PASSWORD environment variable is not set");
+}
+if(!process.env.RESEND_API_KEY) {
+	throw new Error("RESEND_API_KEY environment variable is not set");
+}
+if(!process.env.EMAIL_ADDRESS) {
+	throw new Error("EMAIL_ADDRESS environment variable is not set");
+}
 
 export default {
 	PORT: Number(process.env.PORT) || 4000,
@@ -36,6 +45,8 @@ export default {
 	} as DbConfig,
 
 	LLM_MODEL: "gemini-1.5-pro",
-
+	RESEND_API_KEY: process.env.RESEND_API_KEY,
 	API_KEY: process.env.LLM_API_KEY,
+	EMAIL_PASSWORD: process.env.EMAIL_PASSWORD,
+	EMAIL_ADDRESS: process.env.EMAIL_ADDRESS,
 };

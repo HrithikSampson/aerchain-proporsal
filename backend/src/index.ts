@@ -6,6 +6,10 @@ import http from "http";
 import { Server } from "socket.io";
 import { setupProposalHandlers, getActiveRooms } from "./ai-interaction/handleProporsalRequest";
 import cors from "cors";
+import rfpRouter from "./router/Rfp";
+import vendorRouter from "./router/Vendor";
+import vendorProposalRouter from "./router/VendorProposal";
+import { emailMonitor } from "./email-interaction/email-monitor";
 
 const app = express();
 app.use(express.json());
@@ -13,6 +17,11 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cors({
     origin: config.FRONTEND_URL,
 }));
+
+app.use("/api/rfp", rfpRouter);
+app.use("/api/vendor", vendorRouter);
+app.use("/api/proposal", vendorProposalRouter);
+
 const server = http.createServer(app);
 
 const port = config.PORT;
@@ -45,8 +54,16 @@ export const io = new Server(server, {
 setupProposalHandlers(io);
 
 AppDataSource.initialize()
-    .then(() => {
+    .then(async () => {
         console.log("Data Source has been initialized!");
+
+        try {
+            await emailMonitor.start();
+            console.log("Email monitor started successfully");
+        } catch (error) {
+            console.error("Failed to start email monitor:", error);
+            console.log("Server will continue without email monitoring");
+        }
     }).catch((err) => {
         console.error("Error during Data Source initialization:", err);
     });
@@ -54,6 +71,18 @@ AppDataSource.initialize()
 server.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);
     console.log(`Socket.IO server ready on path: /proposal-socket`);
+});
+
+process.on('SIGTERM', async () => {
+    console.log('SIGTERM received, shutting down gracefully...');
+    await emailMonitor.stop();
+    process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+    console.log('SIGINT received, shutting down gracefully...');
+    await emailMonitor.stop();
+    process.exit(0);
 });
 
 

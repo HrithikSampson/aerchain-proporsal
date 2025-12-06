@@ -6,7 +6,7 @@ import config from "../config/config";
 const rfpParser = new JsonOutputParser<RfpCorePartial>();
 
 const model = new ChatGoogleGenerativeAI({
-  model: "gemini-1.5-flash",
+  model: "gemini-2.5-flash",
   temperature: 0.1,
   apiKey: config.API_KEY,
   maxRetries: 2,
@@ -42,17 +42,18 @@ export class ChainBuilder {
     this.prompts = [];
 
     if (conversationHistory && conversationHistory.length > 0) {
-      let firstMessage = SYSTEM_INSTRUCTIONS + "\n\nUser: " + conversationHistory[0].content;
-      this.prompts.push(["human", firstMessage]);
+      let conversationContext = SYSTEM_INSTRUCTIONS + "\n\nConversation history:\n";
 
-      for (let i = 1; i < conversationHistory.length; i++) {
-        const msg = conversationHistory[i];
+      for (const msg of conversationHistory) {
         if (msg.role === "user") {
-          this.prompts.push(["human", msg.content]);
+          conversationContext += `User: ${msg.content}\n`;
         } else {
-          this.prompts.push(["ai", msg.content]);
+          conversationContext += `Assistant asked: ${msg.content}\n`;
         }
       }
+
+      conversationContext += "\nExtract all RFP data from the user's messages above.";
+      this.prompts.push(["human", conversationContext]);
     }
   }
 
@@ -61,14 +62,10 @@ export class ChainBuilder {
   }
 
   async interactLLM(
-    userMessage?: string
+    _userMessage?: string
   ): Promise<{ response: RfpCorePartial; nextQuestion: string | null }> {
-    if (userMessage) {
-      this.prompts.push(["human", userMessage]);
-    }
-
-    if (this.prompts.length === 0 && userMessage) {
-      const firstMessage = SYSTEM_INSTRUCTIONS + "\n\nUser: " + userMessage;
+    if (this.prompts.length === 0) {
+      const firstMessage = SYSTEM_INSTRUCTIONS + "\n\nNo conversation history yet.";
       this.prompts = [["human", firstMessage]];
     }
 

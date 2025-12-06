@@ -145,13 +145,9 @@ class RFPBuilder<TSchema extends z.ZodObject<any>> {
 
   build(): BuilderFull<TSchema> {
     if (!this.isComplete()) {
+      const missingFields = this.getMissingRequiredFields();
       throw new Error(
-        "Cannot build: missing required fields: " +
-          this.getMissingRequiredFields().map((val)=>{
-            if(val === "rfpItems") {
-              return RfpItemBuilder.fromState(RfpItemSchema).getMissingRequiredFields().map(itemVal => `rfpItems.${String(itemVal)}`).join(", ");
-            }
-          }).join(", ")
+        "Cannot build: missing required fields: " + missingFields.join(", ")
       );
     }
     const result = this.schema.safeParse(this.state);
@@ -170,7 +166,13 @@ class RFPBuilder<TSchema extends z.ZodObject<any>> {
     const missing: (keyof BuilderFull<TSchema>)[] = [];
     for (const key in shape) {
       const fieldSchema: any = shape[key];
-      if (key === "rfpItems" && Array.isArray(state.rfpItems)) {
+
+      if (key === "rfpItems") {
+        if (!Array.isArray(state.rfpItems) || state.rfpItems.length === 0) {
+          missing.push(key as keyof BuilderFull<TSchema>);
+          continue;
+        }
+
         for (let i = 0; i < state.rfpItems.length; i++) {
           const item = state.rfpItems[i];
           const itemBuilder = RfpItemBuilder.fromState(RfpItemSchema, item);
@@ -179,7 +181,9 @@ class RFPBuilder<TSchema extends z.ZodObject<any>> {
             missing.push(...itemMissingFields.map(f => `rfpItems.${i}.${String(f)}` as keyof BuilderFull<TSchema>));
           }
         }
+        continue;
       }
+
       const isOptional =
         typeof fieldSchema.isOptional === "function" &&
         fieldSchema.isOptional();
@@ -206,5 +210,78 @@ export class RfpCoreBuilder extends RFPBuilder<typeof RfpCoreFullSchema> {
 export class RfpItemBuilder extends RFPBuilder<typeof RfpItemSchema> {
   constructor(initial: RfpItemPartial = {}) {
     super(RfpItemSchema, initial);
+  }
+}
+
+export const RfpProposalItemSchema = z
+  .object({
+    name: z
+      .string()
+      .describe("Name of the item being quoted"),
+
+    quantity: z
+      .number()
+      .int()
+      .describe("Quantity of items being offered"),
+
+    unitPrice: z
+      .number()
+      .describe("Price per unit offered by vendor"),
+
+    totalPrice: z
+      .number()
+      .describe("Total price for all units (quantity × unitPrice)"),
+
+    specs: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe("Additional specifications or details about the item"),
+  })
+  .describe("A single item in the vendor's proposal with pricing");
+
+export const RfpProposalFullSchema = z
+  .object({
+    budgetAmount: z
+      .number()
+      .describe("Total budget/quote amount from the vendor"),
+
+    budgetCurrency: z
+      .string()
+      .describe("Currency code like 'USD', 'EUR', 'INR'"),
+
+    items: z
+      .array(RfpProposalItemSchema)
+      .min(1, "At least one item must be provided in the proposal")
+      .describe("List of items the vendor is quoting for"),
+
+    notes: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Additional notes or terms from the vendor"),
+
+    extraItems: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe("Additional metadata for this proposal"),
+  })
+  .describe("Vendor's proposal/quote in response to an RFP");
+
+export type RfpProposalItem = z.infer<typeof RfpProposalItemSchema>;
+export type RfpProposalItemPartial = Partial<RfpProposalItem>;
+
+export type RfpProposalFull = z.infer<typeof RfpProposalFullSchema>;
+export const RfpProposalPartialSchema = RfpProposalFullSchema.partial();
+export type RfpProposalPartial = z.infer<typeof RfpProposalPartialSchema>;
+
+export class RfpProposalBuilder extends RFPBuilder<typeof RfpProposalFullSchema> {
+  constructor(initial: RfpProposalPartial = {}) {
+    super(RfpProposalFullSchema, initial);
+  }
+}
+
+export class RfpProposalItemBuilder extends RFPBuilder<typeof RfpProposalItemSchema> {
+  constructor(initial: RfpProposalItemPartial = {}) {
+    super(RfpProposalItemSchema, initial);
   }
 }

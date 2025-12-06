@@ -52,8 +52,8 @@ export function useProposalSocket() {
       setMessages(prev => [...prev, { role: 'llm', content: data.question }]);
     });
 
-    socketInstance.on('proposal:complete', (data: { message: string; proposal: any; rfpCore: any }) => {
-      console.log('Proposal complete:', data);
+    socketInstance.on('proposal:complete', (data: { message: string; rfp: any; rfpCore: any }) => {
+      console.log('RFP complete:', data);
       setIsComplete(true);
       setCurrentQuestion(null);
       setMessages(prev => [...prev, { role: 'llm', content: data.message }]);

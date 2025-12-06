@@ -1,12 +1,13 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import { useProposalSocket } from '../../hooks/useProposalSocket';
 import Link from 'next/link';
 
 export default function RoomPage() {
   const params = useParams();
+  const router = useRouter();
   const roomId = params.roomId as string;
 
   const {
@@ -30,19 +31,22 @@ export default function RoomPage() {
 
   useEffect(() => {
     if (connected && roomId && !rfpId) {
-      // Check if there's an initial message for this room
       const initialMessage = sessionStorage.getItem(`room-${roomId}-initial`);
 
       if (initialMessage) {
-        // This is a new session - join with the initial message
         sessionStorage.removeItem(`room-${roomId}-initial`);
         startNewSession(initialMessage, roomId);
       } else {
-        // This is a reconnection to an existing room
         joinRoom(roomId);
       }
     }
   }, [connected, roomId, rfpId, startNewSession, joinRoom]);
+
+  useEffect(() => {
+    if (isComplete) {
+      router.push('/');
+    }
+  }, [isComplete, router]);
 
   const handleSendAnswer = (e: React.FormEvent) => {
     e.preventDefault();

@@ -9,7 +9,9 @@
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/data-source.ts",
     "migration:create": "typeorm-ts-node-commonjs migration:create",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
-    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts"
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix"
   },
   "author": "",
   "license": "ISC",
@@ -19,10 +21,13 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "imapflow": "^1.1.1",
     "langchain": "^1.1.5",
     "lodash": "^4.17.21",
+    "mailparser": "^3.9.0",
     "pg": "^8.16.3",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.5.2",
     "socket.io": "^4.8.1",
     "swagger": "^0.7.5",
     "typeorm": "^0.3.27",
@@ -31,6 +36,9 @@
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/node": "^24.10.1",
+    "@typescript-eslint/eslint-plugin": "^8.48.1",
+    "@typescript-eslint/parser": "^8.48.1",
+    "eslint": "^9.39.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
